@@ -342,7 +342,7 @@ function PracticeSheet({ skill, onClose, onLogXp }: { skill: Skill; onClose: () 
                 { amt: 25, label: "Solid\npractice", time: "~30 min" },
                 { amt: 50, label: "Deep\nwork", time: "~1 hour" },
               ].map(({ amt, label, time }) => (
-                <button key={amt} onClick={() => handleLog(amt)} style={{
+                <button key={amt} className="practice-btn" onClick={() => handleLog(amt)} style={{
                   flex: 1, padding: "16px 8px", background: showConfirm && logAmount === amt ? config.color : "transparent",
                   border: `1.5px solid ${showConfirm && logAmount === amt ? config.color : PALETTE.faint}`,
                   borderRadius: 14, cursor: "pointer",
@@ -454,6 +454,8 @@ export default function SkillTreeV2() {
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes budAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
         .tree-selector:hover { background: ${PALETTE.parchment} !important; }
+        .practice-btn:hover { background: ${PALETTE.parchment} !important; border-color: ${PALETTE.stone} !important; transform: translateY(-2px) scale(1.02); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+        .practice-btn:active { transform: scale(0.96) !important; }
         * { box-sizing: border-box; }
       `}</style>
 
