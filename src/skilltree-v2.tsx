@@ -385,7 +385,13 @@ function PracticeSheet({ skill, onClose, onLogXp }: { skill: Skill; onClose: () 
 
 export default function SkillTreeV2() {
   const [activeTree, setActiveTree] = useState("guitar");
-  const [trees, setTrees] = useState(TREES);
+  const [trees, setTrees] = useState(() => {
+    try {
+      const saved = localStorage.getItem("skilltree-data");
+      if (saved) return JSON.parse(saved) as typeof TREES;
+    } catch { /* ignore */ }
+    return TREES;
+  });
   const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
   const [animKey, setAnimKey] = useState(0);
 
@@ -424,6 +430,10 @@ export default function SkillTreeV2() {
       const updated = trees[activeTree].skills[selectedSkill.id];
       if (updated) setSelectedSkill({ ...updated });
     }
+  }, [trees]);
+
+  useEffect(() => {
+    localStorage.setItem("skilltree-data", JSON.stringify(trees));
   }, [trees]);
 
   const switchTree = (key: string) => {
