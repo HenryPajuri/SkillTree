@@ -504,7 +504,7 @@ export default function SkillTreeV2() {
       </div>
 
       {/* SVG Tree */}
-      <svg key={animKey} viewBox="0 0 800 600" style={{
+      <svg key={animKey} viewBox="0 -80 800 760" style={{
         width: "100%", height: "100%", position: "absolute", top: 0, left: 0,
       }}>
         {/* Trunk from bottom */}
