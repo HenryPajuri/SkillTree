@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 
 type SkillStatus = "completed" | "in-progress" | "available" | "locked";
 
