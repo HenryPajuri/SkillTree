@@ -10,6 +10,7 @@
  */
 
 import pptxgen from "pptxgenjs";
+import sharp from "sharp";
 
 // Brand palette (mirrors src/index.css)
 const C = {
@@ -78,7 +79,14 @@ const BRAND_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 48">
   <circle cx="32" cy="20" r="1.2" fill="#E8B5C0"/>
   <circle cx="32" cy="20" r="0.5" fill="#C97A8B"/>
 </svg>`;
-const BRAND_DATA_URL = "data:image/svg+xml;base64," + Buffer.from(BRAND_SVG).toString("base64");
+// Rasterize SVG to PNG so Google Slides / Keynote / older PowerPoint can
+// render it. SVG-as-data-URI works in modern PowerPoint but breaks in
+// Google Slides ("Image could not be loaded").
+const BRAND_PNG = await sharp(Buffer.from(BRAND_SVG))
+  .resize({ width: 800 })
+  .png()
+  .toBuffer();
+const BRAND_DATA_URL = "data:image/png;base64," + BRAND_PNG.toString("base64");
 
 // ---------- Slide chrome (called per slide) ----------
 
