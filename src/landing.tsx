@@ -160,6 +160,192 @@ function ArrowIcon() {
   );
 }
 
+// ---------- Season-card stage illustrations ----------
+// Each is a miniature of one of the four real app states: dormant ghost,
+// bare oak twig, sprouting buds, fully-canopied bloom. Same trunk, same
+// node placement, same palette as the live tree.
+
+function DormantStage() {
+  return (
+    <svg width="80" height="100" viewBox="0 0 80 100">
+      <path d="M 40 100 Q 40 80 40 65" stroke="#C5BBAE" strokeWidth="1.2" strokeDasharray="3 4" fill="none" />
+      <circle cx="40" cy="56" r="14" fill="#FAF6F0" stroke="#C5BBAE" strokeWidth="1.2" strokeDasharray="3 3" />
+      <path d="M 30 38 Q 26 32 22 28" stroke="#C5BBAE" strokeWidth="1" strokeDasharray="2 3" fill="none" />
+      <path d="M 50 38 Q 54 32 58 28" stroke="#C5BBAE" strokeWidth="1" strokeDasharray="2 3" fill="none" />
+      <path d="M 40 35 Q 40 25 38 18" stroke="#C5BBAE" strokeWidth="1" strokeDasharray="2 3" fill="none" />
+      <path d="M 36 32 Q 30 22 28 14" stroke="#C5BBAE" strokeWidth="0.8" strokeDasharray="2 3" fill="none" opacity="0.7" />
+      <path d="M 44 32 Q 50 22 52 14" stroke="#C5BBAE" strokeWidth="0.8" strokeDasharray="2 3" fill="none" opacity="0.7" />
+    </svg>
+  );
+}
+
+function StageBranches() {
+  // Same trunk + branches used by Bare / Growth / Bloom — extracted so they
+  // share geometry exactly.
+  return (
+    <>
+      <path d="M 30 44 Q 22 36 16 28" stroke="#5C4A3A" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <path d="M 50 44 Q 58 36 64 28" stroke="#5C4A3A" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      <path d="M 40 42 Q 40 26 40 14" stroke="#5C4A3A" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+    </>
+  );
+}
+
+function StageTrunk({ gradId }: { gradId: string }) {
+  return (
+    <>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#3D2F24" />
+          <stop offset="55%" stopColor="#5C4A3A" />
+          <stop offset="100%" stopColor="#7A6856" />
+        </linearGradient>
+      </defs>
+      <path d="M 37 100 Q 38 85 39 70 L 41 70 Q 42 85 43 100 Z" fill={`url(#${gradId})`} />
+      <path d="M 39 80 Q 40 90 39 100" stroke="#3D2F24" strokeWidth="0.4" fill="none" opacity="0.5" />
+    </>
+  );
+}
+
+function BareStage() {
+  return (
+    <svg width="80" height="100" viewBox="0 0 80 100">
+      <StageTrunk gradId="bare-tk" />
+      <circle cx="40" cy="56" r="14" fill="#FAF6F0" stroke="#2D4A3E" strokeWidth="1.5" />
+      <path d="M 30 44 Q 22 36 16 28" stroke="#5C4A3A" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <path d="M 50 44 Q 58 36 64 28" stroke="#5C4A3A" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <path d="M 40 42 Q 40 26 40 14" stroke="#5C4A3A" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+      <path d="M 16 28 Q 12 23 10 18" stroke="#5C4A3A" strokeWidth="1.1" fill="none" strokeLinecap="round" />
+      <path d="M 16 28 Q 19 22 18 14" stroke="#5C4A3A" strokeWidth="1" fill="none" strokeLinecap="round" />
+      <path d="M 64 28 Q 68 23 70 18" stroke="#5C4A3A" strokeWidth="1.1" fill="none" strokeLinecap="round" />
+      <path d="M 64 28 Q 61 22 62 14" stroke="#5C4A3A" strokeWidth="1" fill="none" strokeLinecap="round" />
+      <path d="M 40 22 Q 36 16 32 10" stroke="#5C4A3A" strokeWidth="1" fill="none" strokeLinecap="round" />
+      <path d="M 40 22 Q 44 16 48 10" stroke="#5C4A3A" strokeWidth="1" fill="none" strokeLinecap="round" />
+      <circle cx="10" cy="18" r="1" fill="#5C4A3A" />
+      <circle cx="18" cy="14" r="0.9" fill="#5C4A3A" />
+      <circle cx="70" cy="18" r="1" fill="#5C4A3A" />
+      <circle cx="62" cy="14" r="0.9" fill="#5C4A3A" />
+      <circle cx="32" cy="10" r="0.9" fill="#5C4A3A" />
+      <circle cx="48" cy="10" r="0.9" fill="#5C4A3A" />
+      <circle cx="40" cy="14" r="1" fill="#5C4A3A" />
+    </svg>
+  );
+}
+
+function GrowthStage() {
+  return (
+    <svg width="80" height="100" viewBox="0 0 80 100">
+      <StageTrunk gradId="grow-tk" />
+      <circle cx="40" cy="56" r="14" fill="#C8956C" stroke="#C8956C" strokeWidth="1.5" />
+      <StageBranches />
+      <g fill="#A4C09A">
+        <path d="M 14 26 Q 18 28 17 33 Q 13 33 11 30 Q 12 27 14 26 Z" />
+        <path d="M 66 26 Q 70 28 69 33 Q 65 33 63 30 Q 64 27 66 26 Z" />
+        <path d="M 38 12 Q 42 13 42 18 Q 38 19 36 16 Q 36 13 38 12 Z" />
+        <path d="M 20 20 Q 23 22 22 26 Q 18 26 17 23 Q 18 20 20 20 Z" opacity="0.85" />
+        <path d="M 58 22 Q 61 23 61 27 Q 58 28 56 26 Q 56 23 58 22 Z" opacity="0.85" />
+      </g>
+      <g fill="#7BA68F">
+        <path d="M 26 26 Q 29 28 28 32 Q 25 32 24 29 Q 25 26 26 26 Z" opacity="0.85" />
+        <path d="M 54 26 Q 57 28 56 32 Q 53 32 52 29 Q 53 26 54 26 Z" opacity="0.85" />
+        <path d="M 36 18 Q 39 19 38 23 Q 35 23 34 21 Q 34 18 36 18 Z" opacity="0.8" />
+      </g>
+    </svg>
+  );
+}
+
+function BloomStage() {
+  // Procedurally seeded canopy: ~70 leaves in shadow / base / highlight
+  // layers + 6 cherry-blossom dabs. Seeded RNG so the layout is identical
+  // across renders.
+  const { leaves, blossoms } = useMemo(() => {
+    let s = 1;
+    const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+
+    const cx = 40, cy = 25, rx = 28, ry = 14;
+    type Leaf = { x: number; y: number; len: number; rot: number; fill: string; opacity?: number };
+    const leaves: Leaf[] = [];
+
+    // Shadow leaves (back layer, dark)
+    for (let i = 0; i < 32; i++) {
+      const a = rand() * Math.PI * 2;
+      const r = Math.pow(rand(), 0.55);
+      leaves.push({
+        x: cx + Math.cos(a) * r * rx,
+        y: cy + Math.sin(a) * r * ry,
+        len: 2.5 + rand() * 1.5,
+        rot: rand() * 360,
+        fill: "#3F6353",
+        opacity: 0.7,
+      });
+    }
+    // Base leaves
+    for (let i = 0; i < 22; i++) {
+      const a = rand() * Math.PI * 2;
+      const r = Math.pow(rand(), 0.55);
+      leaves.push({
+        x: cx + Math.cos(a) * r * rx,
+        y: cy + Math.sin(a) * r * ry,
+        len: 2.5 + rand() * 1.4,
+        rot: rand() * 360,
+        fill: rand() < 0.5 ? "#5B8472" : "#7BA68F",
+      });
+    }
+    // Highlight leaves (front)
+    for (let i = 0; i < 16; i++) {
+      const a = rand() * Math.PI * 2;
+      const r = Math.pow(rand(), 0.55);
+      leaves.push({
+        x: cx + Math.cos(a) * r * rx,
+        y: cy + Math.sin(a) * r * ry,
+        len: 2 + rand() * 1.1,
+        rot: rand() * 360,
+        fill: "#A8C7B5",
+        opacity: 0.85,
+      });
+    }
+    // Blossom accents
+    const blossoms: { cx: number; cy: number; r: number }[] = [];
+    for (let i = 0; i < 6; i++) {
+      const a = rand() * Math.PI * 2;
+      const r = Math.pow(rand(), 0.55);
+      blossoms.push({
+        cx: cx + Math.cos(a) * r * rx,
+        cy: cy + Math.sin(a) * r * ry,
+        r: 1.3 + rand() * 0.7,
+      });
+    }
+    return { leaves, blossoms };
+  }, []);
+
+  // Almond leaf shape, vertical, scaled by len. Path is small enough that
+  // building once and transforming per leaf keeps the JSX compact.
+  const leafPath = (len: number) => {
+    const w = len * 0.55;
+    return `M 0 ${-len} Q ${w} ${-len * 0.1} ${w * 0.3} ${len * 0.7} Q 0 ${len} ${-w * 0.3} ${len * 0.7} Q ${-w} ${-len * 0.1} 0 ${-len} Z`;
+  };
+
+  return (
+    <svg width="80" height="100" viewBox="0 0 80 100">
+      <StageTrunk gradId="bloom-tk" />
+      <StageBranches />
+      <g>
+        {leaves.map((lf, i) => (
+          <path key={i} d={leafPath(lf.len)} fill={lf.fill} opacity={lf.opacity}
+            transform={`translate(${lf.x.toFixed(1)} ${lf.y.toFixed(1)}) rotate(${lf.rot.toFixed(0)})`} />
+        ))}
+        {blossoms.map((b, i) => (
+          <g key={`bl${i}`}>
+            <circle cx={b.cx} cy={b.cy} r={b.r} fill="#E8B5C0" />
+            <circle cx={b.cx} cy={b.cy} r={b.r * 0.4} fill="#C97A8B" />
+          </g>
+        ))}
+      </g>
+      <circle cx="40" cy="56" r="14" fill="#2D4A3E" stroke="#2D4A3E" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
 // ---------- Landing page ----------
 
 export default function LandingPage({ onPlant }: { onPlant: () => void }) {
@@ -233,63 +419,25 @@ export default function LandingPage({ onPlant }: { onPlant: () => void }) {
           <div className="lp-seasons">
             <div className="lp-season-card">
               <div className="lp-step-num">01</div>
-              <div className="lp-stage">
-                <svg width="60" height="80" viewBox="0 0 60 80">
-                  <circle cx="30" cy="44" r="20" fill="#FAF6F0" stroke="#C5BBAE" strokeWidth="1.2" strokeDasharray="3 3" />
-                  <path d="M 22 35 Q 18 30 15 30" stroke="#C5BBAE" strokeWidth="1" strokeDasharray="2 3" fill="none" />
-                  <path d="M 38 35 Q 42 30 45 30" stroke="#C5BBAE" strokeWidth="1" strokeDasharray="2 3" fill="none" />
-                  <path d="M 30 26 L 30 18" stroke="#C5BBAE" strokeWidth="1" strokeDasharray="2 3" fill="none" />
-                </svg>
-              </div>
+              <div className="lp-stage"><DormantStage /></div>
               <h3 className="lp-h3">Dormant</h3>
               <p>The skill exists in your tree as a ghost branch. Not started — but the path is visible.</p>
             </div>
             <div className="lp-season-card">
               <div className="lp-step-num">02</div>
-              <div className="lp-stage">
-                <svg width="60" height="80" viewBox="0 0 60 80">
-                  <circle cx="30" cy="44" r="20" fill="#FAF6F0" stroke="#2D4A3E" strokeWidth="1.5" />
-                  <path d="M 30 24 Q 32 15 35 10" stroke="#5C4A3A" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-                  <path d="M 22 28 Q 16 22 12 15" stroke="#5C4A3A" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-                  <path d="M 38 26 Q 44 18 50 12" stroke="#5C4A3A" strokeWidth="1.4" fill="none" strokeLinecap="round" />
-                  <circle cx="35" cy="10" r="1.2" fill="#5C4A3A" />
-                  <circle cx="12" cy="15" r="1.2" fill="#5C4A3A" />
-                  <circle cx="50" cy="12" r="1.2" fill="#5C4A3A" />
-                </svg>
-              </div>
+              <div className="lp-stage"><BareStage /></div>
               <h3 className="lp-h3">Bare branch</h3>
               <p>You've committed. The branch is real — woody, ready, waiting for the first practice.</p>
             </div>
             <div className="lp-season-card">
               <div className="lp-step-num">03</div>
-              <div className="lp-stage">
-                <svg width="60" height="80" viewBox="0 0 60 80">
-                  <circle cx="30" cy="44" r="20" fill="#C8956C" stroke="#C8956C" strokeWidth="1.5" />
-                  <ellipse cx="22" cy="20" rx="2.5" ry="4" fill="#A4C09A" transform="rotate(-20 22 20)" />
-                  <ellipse cx="38" cy="18" rx="2.5" ry="4" fill="#A4C09A" transform="rotate(20 38 18)" />
-                  <ellipse cx="30" cy="14" rx="2.5" ry="4" fill="#A4C09A" />
-                  <ellipse cx="15" cy="28" rx="2" ry="3.5" fill="#7BA68F" transform="rotate(-40 15 28)" />
-                  <ellipse cx="45" cy="28" rx="2" ry="3.5" fill="#7BA68F" transform="rotate(40 45 28)" />
-                </svg>
-              </div>
+              <div className="lp-stage"><GrowthStage /></div>
               <h3 className="lp-h3">Growth</h3>
               <p>The first leaves break out. You're returning to it regularly — small wins, real momentum.</p>
             </div>
             <div className="lp-season-card">
               <div className="lp-step-num">04</div>
-              <div className="lp-stage">
-                <svg width="60" height="80" viewBox="0 0 60 80">
-                  <circle cx="30" cy="44" r="20" fill="#2D4A3E" stroke="#2D4A3E" strokeWidth="1.5" />
-                  <ellipse cx="30" cy="18" rx="22" ry="14" fill="#5B8472" />
-                  <ellipse cx="22" cy="15" rx="9" ry="7" fill="#7BA68F" />
-                  <ellipse cx="38" cy="15" rx="8" ry="6" fill="#7BA68F" />
-                  <ellipse cx="30" cy="11" rx="7" ry="5" fill="#A8C7B5" />
-                  <circle cx="18" cy="20" r="1.6" fill="#E8B5C0" />
-                  <circle cx="42" cy="20" r="1.6" fill="#E8B5C0" />
-                  <circle cx="28" cy="8" r="1.4" fill="#E8B5C0" />
-                  <circle cx="36" cy="22" r="1.3" fill="#E8B5C0" />
-                </svg>
-              </div>
+              <div className="lp-stage"><BloomStage /></div>
               <h3 className="lp-h3">In bloom</h3>
               <p>You can do this. Mastered, embodied, on tap. The branch flowers — and stays.</p>
             </div>
