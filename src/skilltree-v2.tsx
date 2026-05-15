@@ -1,579 +1,837 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import type { CSSProperties } from "react";
+import { SkillTree } from "./tree-svg";
+import type { SkillState } from "./tree-svg";
+import { makeT } from "./i18n";
+import type { Lang, TFn } from "./i18n";
+import StatsModal, { computeStats, dayKey } from "./stats-modal";
+import WelcomeModal from "./welcome-modal";
+import { supabase } from "./supabase";
+import type { Session } from "@supabase/supabase-js";
 
-type SkillStatus = "completed" | "in-progress" | "available" | "locked";
+// ---------- DATA ----------
+
+type IconKind = "music-note" | "music-bar" | "diamond" | "diamond-stroke" | "spark";
+type LocalizedText = { en: string; et: string };
 
 interface Skill {
   id: string;
-  name: string;
-  description: string;
-  x: number;
-  y: number;
-  status: SkillStatus;
-  progress: number;
+  name: LocalizedText;
+  description: LocalizedText;
+  icon: IconKind;
   xp: number;
   maxXp: number;
-  icon: string;
-  children: string[];
-  tier: number;
+  parents: string[]; // skill ids that must be bloomed to unlock this
+  tutorial?: { title: string; url: string };
 }
 
-interface SkillTreeData {
-  name: string;
-  description: string;
+// Quick helper that's used in many places below.
+const tx = (text: LocalizedText, lang: Lang): string => text[lang];
+
+interface TreeData {
+  title: string;
+  subtitle: string;
   skills: Record<string, Skill>;
 }
 
-const TREES: Record<string, SkillTreeData> = {
+// Standard 9-node structure; ids match LAYOUTS.balanced anchors.
+// Parents define what must be in bloom before this skill becomes "bare" (ready).
+const TREES: Record<string, TreeData> = {
   guitar: {
-    name: "Guitar",
-    description: "From first strum to jazz voicings",
+    title: "Grow",
+    subtitle: "From first strum to jazz voicings",
     skills: {
-      basics: {
-        id: "basics", name: "The Basics", description: "Holding, tuning, and your first notes",
-        x: 50, y: 88, status: "completed", progress: 100, xp: 120, maxXp: 120,
-        icon: "♪", children: ["chords", "rhythm"], tier: 0,
-      },
-      chords: {
-        id: "chords", name: "Open Chords", description: "The essential shapes that unlock every campfire song",
-        x: 25, y: 55, status: "completed", progress: 100, xp: 200, maxXp: 200,
-        icon: "♫", children: ["barre", "fingerpicking"], tier: 1,
-      },
-      rhythm: {
-        id: "rhythm", name: "Strumming", description: "Finding your groove and developing solid timing",
-        x: 75, y: 60, status: "in-progress", progress: 62, xp: 124, maxXp: 200,
-        icon: "◊", children: ["songwriting"], tier: 1,
-      },
-      barre: {
-        id: "barre", name: "Barre Chords", description: "Moveable shapes that open the entire fretboard",
-        x: 15, y: 30, status: "available", progress: 0, xp: 0, maxXp: 300,
-        icon: "◈", children: ["jazz"], tier: 2,
-      },
-      fingerpicking: {
-        id: "fingerpicking", name: "Fingerpicking", description: "Delicate patterns with individual fingers",
-        x: 42, y: 25, status: "available", progress: 0, xp: 0, maxXp: 300,
-        icon: "✧", children: ["jazz"], tier: 2,
-      },
-      songwriting: {
-        id: "songwriting", name: "Songwriting", description: "Composing your own pieces and progressions",
-        x: 72, y: 28, status: "locked", progress: 0, xp: 0, maxXp: 350,
-        icon: "✦", children: [], tier: 2,
-      },
-      jazz: {
-        id: "jazz", name: "Jazz Voicings", description: "Extended chords and advanced harmony",
-        x: 32, y: 8, status: "locked", progress: 0, xp: 0, maxXp: 500,
-        icon: "❋", children: [], tier: 3,
-      },
+      t0: { id: "t0",
+        name: { en: "The Basics", et: "Põhitõed" },
+        description: { en: "Holding, tuning, and your first notes", et: "Hoidmine, häälestamine ja esimesed noodid" },
+        icon: "music-note", xp: 0, maxXp: 120, parents: [],
+        tutorial: { title: "Beginner Day 1: Guitar Quick Start (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/beginner-day-1-guitar-quick-start-aw-007" } },
+      tm1: { id: "tm1",
+        name: { en: "Music Theory", et: "Muusikateooria" },
+        description: { en: "Scales, intervals, and the language of harmony", et: "Skaalad, intervallid ja harmoonia keel" },
+        icon: "diamond-stroke", xp: 0, maxXp: 200, parents: ["t0"],
+        tutorial: { title: "Practical Music Theory: Introduction to Intervals (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/introduction-to-intervals-mt-501" } },
+      t1a: { id: "t1a",
+        name: { en: "Open Chords", et: "Avatud akordid" },
+        description: { en: "The shapes that unlock every campfire song", et: "Kujundid, mis avavad iga lõkkelaulu" },
+        icon: "music-bar", xp: 0, maxXp: 200, parents: ["tm1"],
+        tutorial: { title: "The 8 Essential Beginner Chords (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/the-8-essential-beginner-chords-ch-110" } },
+      t1b: { id: "t1b",
+        name: { en: "Strumming", et: "Akordilöögid" },
+        description: { en: "Finding your groove and solid timing", et: "Oma rütmi ja tugeva ajatuse leidmine" },
+        icon: "diamond", xp: 0, maxXp: 200, parents: ["tm1"],
+        tutorial: { title: "THE Strumming Pattern (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/the-strumming-pattern-b1-404" } },
+      t2a: { id: "t2a",
+        name: { en: "Barre Chords", et: "Barré-akordid" },
+        description: { en: "Moveable shapes that open the entire fretboard", et: "Liikuvad kujundid, mis avavad kogu kaela" },
+        icon: "diamond-stroke", xp: 0, maxXp: 300, parents: ["t1a"],
+        tutorial: { title: "E Shape Barre Chords: Major (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/e-shape-barre-chords-major-4b-001" } },
+      t2b: { id: "t2b",
+        name: { en: "Fingerpicking", et: "Sõrmemäng" },
+        description: { en: "Delicate patterns with individual fingers", et: "Õrnad mustrid eraldi sõrmedega" },
+        icon: "spark", xp: 0, maxXp: 300, parents: ["t1a"],
+        tutorial: { title: "Introduction to Fingerstyle Guitar (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/introduction-to-fingerstyle-guitar-bg-1105" } },
+      t2c: { id: "t2c",
+        name: { en: "Songwriting", et: "Lugude loomine" },
+        description: { en: "Composing your own pieces and progressions", et: "Oma palade ja akordijärgnevuste loomine" },
+        icon: "spark", xp: 0, maxXp: 350, parents: ["t1b"],
+        tutorial: { title: "Common Chord Progressions (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/common-chord-progressions-mt-422" } },
+      tm2: { id: "tm2",
+        name: { en: "Improvisation", et: "Improvisatsioon" },
+        description: { en: "Speaking in scales and shaping a solo on the fly", et: "Skaaladega rääkimine ja soolo loomine lennult" },
+        icon: "spark", xp: 0, maxXp: 400, parents: ["t2a", "t2b", "t2c"],
+        tutorial: { title: "Minor Pentatonic: The 5 Patterns (JustinGuitar)", url: "https://www.justinguitar.com/guitar-lessons/minor-pentatonic-the-5-patterns-sc-304" } },
+      t3: { id: "t3",
+        name: { en: "Jazz Voicings", et: "Džässakordid" },
+        description: { en: "Extended chords and advanced harmony", et: "Laiendatud akordid ja edasijõudnute harmoonia" },
+        icon: "spark", xp: 0, maxXp: 500, parents: ["tm2"],
+        tutorial: { title: "The Ultimate Jazz Chord Guide (Jens Larsen)", url: "https://jenslarsen.nl/the-ultimate-jazz-chord-guide-12-most-important-voicing-types/" } },
     },
   },
   cooking: {
-    name: "Cooking",
-    description: "From knife skills to plated art",
+    title: "Grow",
+    subtitle: "From boiling water to plated dinners",
     skills: {
-      knifeskills: {
-        id: "knifeskills", name: "Knife Skills", description: "Dice, julienne, chiffonade — the foundation",
-        x: 50, y: 88, status: "completed", progress: 100, xp: 150, maxXp: 150,
-        icon: "△", children: ["sauces", "proteins"], tier: 0,
-      },
-      sauces: {
-        id: "sauces", name: "Mother Sauces", description: "The five French sauces that build everything",
-        x: 28, y: 55, status: "in-progress", progress: 40, xp: 80, maxXp: 200,
-        icon: "○", children: ["plating"], tier: 1,
-      },
-      proteins: {
-        id: "proteins", name: "Proteins", description: "Meat, fish, and tofu — cooked to perfection",
-        x: 72, y: 55, status: "available", progress: 0, xp: 0, maxXp: 250,
-        icon: "◇", children: ["plating"], tier: 1,
-      },
-      plating: {
-        id: "plating", name: "Plating", description: "Turning dishes into visual art",
-        x: 50, y: 22, status: "locked", progress: 0, xp: 0, maxXp: 300,
-        icon: "❊", children: [], tier: 2,
-      },
+      t0: { id: "t0",
+        name: { en: "Knife Skills", et: "Noaoskused" },
+        description: { en: "Dice, julienne, chiffonade — the foundation", et: "Kuubikud, peenikesed ribad, lehed — alus" },
+        icon: "music-note", xp: 0, maxXp: 120, parents: [],
+        tutorial: { title: "Knife Skills: How to Chop (Serious Eats)", url: "https://www.youtube.com/watch?v=XyS915RynEQ" } },
+      tm1: { id: "tm1",
+        name: { en: "Seasoning", et: "Maitsestamine" },
+        description: { en: "Salt, acid, fat, heat — balancing the elements", et: "Sool, hape, rasv, kuumus — elementide tasakaal" },
+        icon: "diamond-stroke", xp: 0, maxXp: 180, parents: ["t0"],
+        tutorial: { title: "Samin Nosrat on Salt, Fat, Acid, Heat (The Splendid Table)", url: "https://www.splendidtable.org/story/2017/05/05/samin-nosrat-on-mastering-salt-fat-acid-and-heat" } },
+      t1a: { id: "t1a",
+        name: { en: "Eggs", et: "Munad" },
+        description: { en: "Scrambles, omelets, poached — perfect every time", et: "Munaroad, omletid, vesimunad — alati ideaalsed" },
+        icon: "music-bar", xp: 0, maxXp: 200, parents: ["tm1"],
+        tutorial: { title: "Really Good Scrambled Eggs (Kenji López-Alt)", url: "https://www.youtube.com/watch?v=CXTnq7srJRs" } },
+      t1b: { id: "t1b",
+        name: { en: "Stocks", et: "Puljongid" },
+        description: { en: "Building flavor from bones and scraps", et: "Maitse ehitamine kontidest ja jäänustest" },
+        icon: "diamond", xp: 0, maxXp: 220, parents: ["tm1"],
+        tutorial: { title: "The Ultimate Guide to Amazing Chicken Stock", url: "https://www.youtube.com/watch?v=rjDHii3Ngj8" } },
+      t2a: { id: "t2a",
+        name: { en: "Pasta", et: "Pasta" },
+        description: { en: "Doughs, shapes, and sauces that cling", et: "Taignad, kujud ja kastmed, mis hoiavad kinni" },
+        icon: "diamond-stroke", xp: 0, maxXp: 280, parents: ["t1a"],
+        tutorial: { title: "Homemade Fresh Egg Pasta (Serious Eats)", url: "https://www.seriouseats.com/fresh-egg-pasta" } },
+      t2b: { id: "t2b",
+        name: { en: "Searing", et: "Pruunistamine" },
+        description: { en: "Crusts, Maillard, and resting meat right", et: "Koorikud, Maillard ja liha õige puhkamine" },
+        icon: "spark", xp: 0, maxXp: 280, parents: ["t1a"],
+        tutorial: { title: "The Reverse Sear (Kenji's Cooking Show)", url: "https://www.youtube.com/watch?v=pO8TUuSv7HA" } },
+      t2c: { id: "t2c",
+        name: { en: "Sauces", et: "Kastmed" },
+        description: { en: "The five mother sauces and what builds from them", et: "Viis emakastet ja see, mis nendest ehitub" },
+        icon: "spark", xp: 0, maxXp: 320, parents: ["t1b"],
+        tutorial: { title: "How to Make the Five Mother Sauces (Escoffier)", url: "https://www.escoffier.edu/blog/recipes/how-to-make-the-five-mother-sauces/" } },
+      tm2: { id: "tm2",
+        name: { en: "Timing", et: "Ajastus" },
+        description: { en: "Composing a multi-course dinner that lands hot", et: "Mitmekäigulise õhtusöögi loomine, mis jõuab lauale soojalt" },
+        icon: "spark", xp: 0, maxXp: 400, parents: ["t2a", "t2b", "t2c"],
+        tutorial: { title: "7 Rules for Cooking a Multi-Course Meal with Confidence (The Kitchn)", url: "https://www.thekitchn.com/7-rules-for-cooking-a-multi-course-meal-with-confidence-221411" } },
+      t3: { id: "t3",
+        name: { en: "Plating", et: "Serveerimine" },
+        description: { en: "Turning a dish into something you stop to look at", et: "Toidu muutmine millekski, mille pärast peatud" },
+        icon: "spark", xp: 0, maxXp: 500, parents: ["tm2"],
+        tutorial: { title: "The 6 Rules of Plating (Epicurious 101)", url: "https://www.youtube.com/watch?v=T2leakA9Uo8" } },
     },
   },
   drawing: {
-    name: "Drawing",
-    description: "From first line to full scenes",
+    title: "Grow",
+    subtitle: "From contour lines to compositions",
     skills: {
-      lines: {
-        id: "lines", name: "Line Control", description: "Confident marks drawn from the shoulder",
-        x: 50, y: 88, status: "completed", progress: 100, xp: 100, maxXp: 100,
-        icon: "—", children: ["shapes", "perspective"], tier: 0,
-      },
-      shapes: {
-        id: "shapes", name: "Form & Shape", description: "Breaking everything into basic 3D forms",
-        x: 30, y: 55, status: "in-progress", progress: 75, xp: 150, maxXp: 200,
-        icon: "□", children: ["anatomy", "shading"], tier: 1,
-      },
-      perspective: {
-        id: "perspective", name: "Perspective", description: "1, 2, and 3-point spatial drawing",
-        x: 70, y: 58, status: "available", progress: 0, xp: 0, maxXp: 250,
-        icon: "⬡", children: ["environments"], tier: 1,
-      },
-      anatomy: {
-        id: "anatomy", name: "Anatomy", description: "The human figure drawn with understanding",
-        x: 18, y: 25, status: "locked", progress: 0, xp: 0, maxXp: 400,
-        icon: "⊕", children: [], tier: 2,
-      },
-      shading: {
-        id: "shading", name: "Light & Shadow", description: "Rendering form through value",
-        x: 44, y: 22, status: "locked", progress: 0, xp: 0, maxXp: 300,
-        icon: "◐", children: [], tier: 2,
-      },
-      environments: {
-        id: "environments", name: "Environments", description: "Immersive spaces and landscapes",
-        x: 70, y: 25, status: "locked", progress: 0, xp: 0, maxXp: 350,
-        icon: "▲", children: [], tier: 2,
-      },
+      t0: { id: "t0",
+        name: { en: "Line", et: "Joon" },
+        description: { en: "Confident marks drawn from the shoulder", et: "Enesekindlad jooned õlast tõmmatuna" },
+        icon: "music-note", xp: 0, maxXp: 100, parents: [],
+        tutorial: { title: "Drawabox Lesson 1: Superimposed Lines", url: "https://drawabox.com/lesson/1/superimposedlines" } },
+      tm1: { id: "tm1",
+        name: { en: "Gesture", et: "Žest" },
+        description: { en: "Capturing motion and weight in a few strokes", et: "Liikumise ja raskuse tabamine mõne tõmbega" },
+        icon: "diamond-stroke", xp: 0, maxXp: 180, parents: ["t0"],
+        tutorial: { title: "How to Draw Gesture (Proko)", url: "https://www.proko.com/course-lesson/how-to-draw-gesture/" } },
+      t1a: { id: "t1a",
+        name: { en: "Shape", et: "Kuju" },
+        description: { en: "Breaking the world into flat silhouettes", et: "Maailma jaotamine lameneteks siluettideks" },
+        icon: "music-bar", xp: 0, maxXp: 200, parents: ["tm1"],
+        tutorial: { title: "Good Shapes — 10 Minutes To Better Painting (Marco Bucci)", url: "https://www.youtube.com/watch?v=-ZknWKTpc90" } },
+      t1b: { id: "t1b",
+        name: { en: "Value", et: "Toon" },
+        description: { en: "Light, dark, and the contrast in between", et: "Hele, tume ja nende vaheline kontrast" },
+        icon: "diamond", xp: 0, maxXp: 200, parents: ["tm1"],
+        tutorial: { title: "Light and Shadow — 10 Minutes To Better Painting (Marco Bucci)", url: "https://www.youtube.com/watch?v=xcCJ2CU-bFw" } },
+      t2a: { id: "t2a",
+        name: { en: "Form", et: "Vorm" },
+        description: { en: "Turning silhouettes into three-dimensional volume", et: "Siluettide muutmine kolmemõõtmeliseks ruumiks" },
+        icon: "diamond-stroke", xp: 0, maxXp: 280, parents: ["t1a"],
+        tutorial: { title: "Structure Basics — Making Things Look 3D (Proko)", url: "https://www.proko.com/course-lesson/structure-basics-making-things-look-3d" } },
+      t2b: { id: "t2b",
+        name: { en: "Perspective", et: "Perspektiiv" },
+        description: { en: "One, two, and three-point spatial drawing", et: "Ühe-, kahe- ja kolmepunktiline ruumijoonistamine" },
+        icon: "spark", xp: 0, maxXp: 300, parents: ["t1a"],
+        tutorial: { title: "One-Point Perspective (Proko)", url: "https://www.proko.com/course-lesson/one-point-perspective" } },
+      t2c: { id: "t2c",
+        name: { en: "Texture", et: "Tekstuur" },
+        description: { en: "Surface marks — rough, smooth, soft, hard", et: "Pinnamärgid — krobeline, sile, pehme, kõva" },
+        icon: "spark", xp: 0, maxXp: 280, parents: ["t1b"],
+        tutorial: { title: "Drawabox Lesson 2: Texture and Detail", url: "https://drawabox.com/lesson/2/2" } },
+      tm2: { id: "tm2",
+        name: { en: "Color Theory", et: "Värviteooria" },
+        description: { en: "Hue, saturation, temperature, and harmony", et: "Toon, küllastatus, temperatuur ja harmoonia" },
+        icon: "spark", xp: 0, maxXp: 380, parents: ["t2a", "t2b", "t2c"],
+        tutorial: { title: "Color Theory Basics for Digital Painters", url: "https://www.youtube.com/watch?v=P0P8iGs2jWI" } },
+      t3: { id: "t3",
+        name: { en: "Composition", et: "Kompositsioon" },
+        description: { en: "Arranging the eye through a finished scene", et: "Pilgu juhtimine läbi valmis stseeni" },
+        icon: "spark", xp: 0, maxXp: 500, parents: ["tm2"],
+        tutorial: { title: "Visual Language — 10 Minutes To Better Painting (Marco Bucci)", url: "https://www.youtube.com/watch?v=9fknSkyN6_0" } },
     },
   },
 };
 
-const PALETTE = {
-  cream: "#FAF6F0",
-  parchment: "#F0E8DC",
-  ink: "#1A1A18",
-  forest: "#2D4A3E",
-  forestLight: "#3D6B5A",
-  amber: "#C8956C",
-  amberLight: "#E2B98B",
-  amberDark: "#A67448",
-  terracotta: "#C4654A",
-  sage: "#8BA692",
-  stone: "#9B9585",
-  muted: "#B5ADA0",
-  faint: "#D8D0C4",
+const NODE_IDS = ["t0", "tm1", "t1a", "t1b", "t2a", "t2b", "t2c", "tm2", "t3"];
+
+// ---------- STATE DERIVATION ----------
+
+function deriveState(skill: Skill, allSkills: Record<string, Skill>): SkillState {
+  if (skill.xp >= skill.maxXp) return "bloom";
+  if (skill.xp > 0) return "budding";
+  // A skill unlocks as soon as ALL parents have ANY progress — you can pick up
+  // chords or strumming while still working through music theory.
+  const parentsReady = skill.parents.every((pid) => {
+    const p = allSkills[pid];
+    return p && p.xp > 0;
+  });
+  return parentsReady ? "bare" : "dormant";
+}
+
+function deriveAllStates(skills: Record<string, Skill>): Record<string, SkillState> {
+  const out: Record<string, SkillState> = {};
+  for (const id of Object.keys(skills)) {
+    out[id] = deriveState(skills[id], skills);
+  }
+  return out;
+}
+
+const STATE_COLORS: Record<SkillState, { fill: string; stroke: string; icon: string; label: string }> = {
+  bloom:   { fill: "#2D4A3E", stroke: "#2D4A3E", icon: "#FAF6F0", label: "#2D4A3E" },
+  budding: { fill: "#C8956C", stroke: "#C8956C", icon: "#FAF6F0", label: "#A67448" },
+  bare:    { fill: "#FAF6F0", stroke: "#2D4A3E", icon: "#2D4A3E", label: "#5C4A3A" },
+  dormant: { fill: "#FAF6F0", stroke: "#C5BBAE", icon: "#C5BBAE", label: "#B5ADA0" },
 };
 
-interface StatusStyle {
-  color: string;
-  fill: string;
-  textColor: string;
-  label: string;
-  ring: string;
+// ---------- ICON GLYPHS ----------
+
+function NodeIcon({ kind, color }: { kind: IconKind; color: string }) {
+  if (kind === "music-note") {
+    return (
+      <g fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M -3 5 L -3 -6 L 5 -8 L 5 3" />
+        <ellipse cx="-5" cy="5" rx="3" ry="2.2" fill={color} stroke="none" />
+        <ellipse cx="3" cy="3" rx="3" ry="2.2" fill={color} stroke="none" />
+      </g>
+    );
+  }
+  if (kind === "music-bar") {
+    return (
+      <g fill="none" stroke={color} strokeWidth="1.6" strokeLinecap="round">
+        <path d="M -5 5 L -5 -6" />
+        <path d="M 5 3 L 5 -8" />
+        <path d="M -5 -6 L 5 -8" />
+        <ellipse cx="-6" cy="5" rx="2.2" ry="1.6" fill={color} stroke="none" />
+        <ellipse cx="4" cy="3" rx="2.2" ry="1.6" fill={color} stroke="none" />
+      </g>
+    );
+  }
+  if (kind === "diamond") {
+    return <path d="M 0 -7 L 7 0 L 0 7 L -7 0 Z" fill={color} />;
+  }
+  if (kind === "diamond-stroke") {
+    return <path d="M 0 -7 L 7 0 L 0 7 L -7 0 Z" fill="none" stroke={color} strokeWidth="1.6" />;
+  }
+  // spark
+  return <path d="M 0 -8 Q 1.5 -1.5 8 0 Q 1.5 1.5 0 8 Q -1.5 1.5 -8 0 Q -1.5 -1.5 0 -8 Z" fill={color} />;
 }
 
-const STATUS_CONFIG: Record<SkillStatus, StatusStyle> = {
-  completed: { color: PALETTE.forest, fill: PALETTE.forest, textColor: PALETTE.cream, label: "Mastered", ring: PALETTE.forestLight },
-  "in-progress": { color: PALETTE.amber, fill: PALETTE.amber, textColor: PALETTE.cream, label: "Growing", ring: PALETTE.amberLight },
-  available: { color: PALETTE.forestLight, fill: "transparent", textColor: PALETTE.forest, label: "Ready", ring: PALETTE.sage },
-  locked: { color: PALETTE.faint, fill: "transparent", textColor: PALETTE.muted, label: "Locked", ring: PALETTE.faint },
-};
+// ---------- PRACTICE SHEET ----------
 
-function OrganicBranch({ parent, child, parentStatus }: { parent: Skill; child: Skill; parentStatus: SkillStatus }) {
-  const svgW = 800, svgH = 600;
-  const x1 = (parent.x / 100) * svgW, y1 = (parent.y / 100) * svgH;
-  const x2 = (child.x / 100) * svgW, y2 = (child.y / 100) * svgH;
-
-  const midY = y1 + (y2 - y1) * 0.4;
-  const wobble = (x2 - x1) * 0.15;
-  const path = `M ${x1} ${y1} C ${x1 + wobble} ${midY}, ${x2 - wobble} ${midY + (y2 - y1) * 0.1}, ${x2} ${y2}`;
-
-  const isActive = parentStatus === "completed";
-  const isPartial = parentStatus === "in-progress";
-
-  return (
-    <g>
-      <path d={path} fill="none" stroke={isActive ? PALETTE.forest : isPartial ? PALETTE.amber + "66" : PALETTE.faint}
-        strokeWidth={isActive ? 2.5 : 1.5}
-        strokeDasharray={!isActive && !isPartial ? "8 6" : "none"}
-        strokeLinecap="round" opacity={isActive ? 0.7 : isPartial ? 0.5 : 0.3} />
-      {isActive && <>
-        <circle r="3" fill={PALETTE.forest} opacity={0.4}>
-          <animateMotion dur="4s" repeatCount="indefinite" path={path} />
-        </circle>
-      </>}
-    </g>
-  );
-}
-
-function SkillBud({ skill, onClick, selected, index }: { skill: Skill; onClick: (s: Skill) => void; selected: boolean; index: number }) {
-  const config = STATUS_CONFIG[skill.status];
-  const isLocked = skill.status === "locked";
-  const svgW = 800, svgH = 600;
-  const cx = (skill.x / 100) * svgW, cy = (skill.y / 100) * svgH;
-  const r = 28;
-
-  return (
-    <g onClick={() => !isLocked && onClick(skill)} style={{ cursor: isLocked ? "default" : "pointer" }}
-      className="skill-bud" opacity={0}
-      >
-      <style>{`
-        .skill-bud { animation: budAppear 0.6s ease-out ${index * 0.08 + 0.2}s forwards; }
-        @keyframes budAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
-      `}</style>
-
-      {selected && <circle cx={cx} cy={cy} r={r + 14} fill="none" stroke={config.ring}
-        strokeWidth={1} opacity={0.4} strokeDasharray="4 4">
-        <animateTransform attributeName="transform" type="rotate"
-          from={`0 ${cx} ${cy}`} to={`360 ${cx} ${cy}`} dur="20s" repeatCount="indefinite" />
-      </circle>}
-
-      {skill.status === "completed" && <>
-        <circle cx={cx} cy={cy} r={r + 6} fill="none" stroke={PALETTE.forest} strokeWidth={0.5} opacity={0.2} />
-        <circle cx={cx} cy={cy} r={r + 10} fill="none" stroke={PALETTE.forest} strokeWidth={0.3} opacity={0.1} />
-      </>}
-
-      <circle cx={cx} cy={cy} r={r} fill={config.fill || "transparent"}
-        stroke={config.color} strokeWidth={skill.status === "available" ? 1.5 : 2}
-        strokeDasharray={isLocked ? "3 3" : "none"} opacity={isLocked ? 0.4 : 1} />
-
-      {skill.status === "in-progress" && <>
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={PALETTE.parchment}
-          strokeWidth={3} opacity={0.3} />
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke={config.color}
-          strokeWidth={3} strokeDasharray={`${(skill.progress / 100) * (2 * Math.PI * r)} ${2 * Math.PI * r}`}
-          strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} opacity={0.9} />
-      </>}
-
-      <text x={cx} y={cy + 1} textAnchor="middle" dominantBaseline="central"
-        fontSize={skill.status === "completed" ? "16" : "14"}
-        fontFamily="'Playfair Display', serif" fontWeight={500}
-        fill={skill.status === "available" ? config.color : config.textColor}
-        opacity={isLocked ? 0.3 : 1} style={{ pointerEvents: "none" }}>
-        {skill.icon}
-      </text>
-
-      <text x={cx} y={cy + r + 18} textAnchor="middle" dominantBaseline="central"
-        fontSize="11" fontFamily="'DM Sans', sans-serif" fontWeight={500}
-        fill={isLocked ? PALETTE.muted : PALETTE.ink} opacity={isLocked ? 0.35 : 0.75}
-        letterSpacing="0.3px" style={{ pointerEvents: "none" }}>
-        {skill.name}
-      </text>
-    </g>
-  );
-}
-
-function PracticeSheet({ skill, onClose, onLogXp }: { skill: Skill; onClose: () => void; onLogXp: (id: string, amount: number) => void }) {
-  const config = STATUS_CONFIG[skill.status];
-  const isLocked = skill.status === "locked";
-  const [logAmount, setLogAmount] = useState<number | null>(null);
-  const [showConfirm, setShowConfirm] = useState(false);
+function PracticeSheet({ skill, state, t, lang, onClose, onLogXp, onReset }: {
+  skill: Skill; state: SkillState; t: TFn; lang: Lang;
+  onClose: () => void;
+  onLogXp: (id: string, amount: number) => void;
+  onReset: (id: string) => void;
+}) {
+  const [pending, setPending] = useState<number | null>(null);
+  const isDone = state === "bloom";
+  const isLocked = state === "dormant";
 
   const handleLog = (amt: number) => {
-    setLogAmount(amt);
-    setShowConfirm(true);
+    setPending(amt);
     setTimeout(() => {
       onLogXp(skill.id, amt);
-      setShowConfirm(false);
-      setLogAmount(null);
-    }, 600);
+      setPending(null);
+    }, 350);
   };
 
-  return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 100,
-      display: "flex", alignItems: "flex-end", justifyContent: "center",
-    }} onClick={onClose}>
-      <div style={{
-        position: "absolute", inset: 0,
-        background: "rgba(26,26,24,0.2)", backdropFilter: "blur(4px)",
-      }} />
-      <div onClick={(e) => e.stopPropagation()} style={{
-        position: "relative", width: "100%", maxWidth: 480,
-        background: PALETTE.cream, borderRadius: "24px 24px 0 0",
-        padding: "32px 28px 40px", animation: "sheetUp 0.35s cubic-bezier(0.16,1,0.3,1)",
-        boxShadow: "0 -8px 40px rgba(0,0,0,0.08)",
-      }}>
-        <div style={{
-          width: 36, height: 4, borderRadius: 2, background: PALETTE.faint,
-          margin: "0 auto 24px",
-        }} />
+  const progressPct = Math.min(100, Math.round((skill.xp / skill.maxXp) * 100));
+  const stateColor = STATE_COLORS[state];
+  const stateLabelKey = ({
+    bloom: "inBloom", budding: "budding", bare: "bareBranch", dormant: "dormant",
+  } as const)[state];
 
-        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 20 }}>
-          <div style={{
-            width: 52, height: 52, borderRadius: "50%", display: "flex",
-            alignItems: "center", justifyContent: "center",
-            background: config.fill || PALETTE.parchment,
-            border: `2px solid ${config.color}`,
-          }}>
-            <span style={{
-              fontSize: 20, fontFamily: "'Playfair Display', serif",
-              color: skill.status === "available" ? config.color : config.textColor,
-            }}>{skill.icon}</span>
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet-grab" />
+
+        <div className="sheet-header">
+          <div className="sheet-icon" style={{ background: stateColor.fill, borderColor: stateColor.stroke }}>
+            <svg viewBox="-12 -12 24 24" width="32" height="32"><NodeIcon kind={skill.icon} color={stateColor.icon} /></svg>
           </div>
           <div style={{ flex: 1 }}>
-            <h3 style={{
-              fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 600,
-              color: PALETTE.ink, margin: 0, lineHeight: 1.2,
-            }}>{skill.name}</h3>
-            <p style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: 13,
-              color: PALETTE.stone, margin: "4px 0 0",
-            }}>{skill.description}</p>
+            <h3 className="sheet-title">{tx(skill.name, lang)}</h3>
+            <p className="sheet-desc">{tx(skill.description, lang)}</p>
           </div>
         </div>
 
-        <div style={{
-          background: PALETTE.parchment, borderRadius: 12, padding: "14px 16px", marginBottom: 20,
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: PALETTE.stone, fontWeight: 500 }}>
-              {isLocked ? "Prerequisites needed" : `${skill.xp} of ${skill.maxXp} XP`}
-            </span>
-            <span style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
-              color: config.color,
-            }}>
-              {isLocked ? "Locked" : skill.status === "completed" ? "Complete" : `${skill.progress}%`}
+        <div className="sheet-progress">
+          <div className="sheet-progress-row">
+            <span>{isLocked ? t("prerequisitesNeeded") : `${skill.xp} ${t("ofXp")} ${skill.maxXp} ${t("xp")}`}</span>
+            <span style={{ color: stateColor.label, fontWeight: 600 }}>
+              {t(stateLabelKey)}{!isLocked && !isDone ? ` · ${progressPct}%` : ""}
             </span>
           </div>
-          <div style={{
-            height: 6, background: PALETTE.cream, borderRadius: 3, overflow: "hidden",
-          }}>
-            <div style={{
-              height: "100%", width: `${skill.progress}%`, borderRadius: 3,
-              background: `linear-gradient(90deg, ${config.color}88, ${config.color})`,
-              transition: "width 0.8s cubic-bezier(0.16,1,0.3,1)",
-            }} />
+          <div className="sheet-progress-track">
+            <div className="sheet-progress-fill"
+              style={{ width: `${progressPct}%`, background: `linear-gradient(90deg, ${stateColor.fill}88, ${stateColor.fill})` }} />
           </div>
         </div>
 
-        {!isLocked && skill.status !== "completed" && (
-          <div>
-            <p style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: PALETTE.stone,
-              margin: "0 0 10px", fontWeight: 500, letterSpacing: "0.5px",
-              textTransform: "uppercase",
-            }}>Log practice</p>
-            <div style={{ display: "flex", gap: 10 }}>
+        {!isLocked && !isDone && (
+          <div className="sheet-log">
+            <p className="sheet-log-label">{t("logPractice")}</p>
+            <div className="sheet-log-buttons">
               {[
-                { amt: 10, label: "Quick\nsession", time: "~15 min" },
-                { amt: 25, label: "Solid\npractice", time: "~30 min" },
-                { amt: 50, label: "Deep\nwork", time: "~1 hour" },
-              ].map(({ amt, label, time }) => (
-                <button key={amt} className="practice-btn" onClick={() => handleLog(amt)} style={{
-                  flex: 1, padding: "16px 8px", background: showConfirm && logAmount === amt ? config.color : "transparent",
-                  border: `1.5px solid ${showConfirm && logAmount === amt ? config.color : PALETTE.faint}`,
-                  borderRadius: 14, cursor: "pointer",
-                  transition: "all 0.3s cubic-bezier(0.16,1,0.3,1)",
-                  transform: showConfirm && logAmount === amt ? "scale(0.96)" : "scale(1)",
-                }}>
-                  <div style={{
-                    fontFamily: "'Playfair Display', serif", fontSize: 20, fontWeight: 600,
-                    color: showConfirm && logAmount === amt ? PALETTE.cream : PALETTE.ink,
-                    marginBottom: 4,
-                  }}>+{amt}</div>
-                  <div style={{
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 10,
-                    color: showConfirm && logAmount === amt ? PALETTE.cream + "cc" : PALETTE.stone,
-                    lineHeight: 1.3, whiteSpace: "pre-line",
-                  }}>{label}</div>
-                  <div style={{
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 9, marginTop: 4,
-                    color: showConfirm && logAmount === amt ? PALETTE.cream + "88" : PALETTE.muted,
-                  }}>{time}</div>
-                </button>
-              ))}
+                { amt: 10, labelKey: "quickSession", timeKey: "about15min" },
+                { amt: 25, labelKey: "solidPractice", timeKey: "about30min" },
+                { amt: 50, labelKey: "deepWork", timeKey: "about1hour" },
+              ].map(({ amt, labelKey, timeKey }) => {
+                const active = pending === amt;
+                return (
+                  <button key={amt} className={`log-btn${active ? " is-active" : ""}`} onClick={() => handleLog(amt)}
+                    style={active ? { background: stateColor.fill, borderColor: stateColor.fill } : undefined}>
+                    <span className="log-amt" style={active ? { color: "#FAF6F0" } : undefined}>+{amt}</span>
+                    <span className="log-label" style={active ? { color: "#FAF6F0" } : undefined}>{t(labelKey as "quickSession")}</span>
+                    <span className="log-time" style={active ? { color: "#FAF6F0CC" } : undefined}>{t(timeKey as "about15min")}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {skill.status === "completed" && (
-          <div style={{
-            textAlign: "center", padding: "12px 0",
-            fontFamily: "'Playfair Display', serif", fontSize: 16,
-            color: PALETTE.forest, fontStyle: "italic",
-          }}>
-            This branch has fully bloomed.
+        {isDone && <p className="sheet-done">{t("branchBloomed")}</p>}
+        {isLocked && <p className="sheet-locked">{t("unlockHint")}</p>}
+
+        {skill.tutorial && (
+          <div className="sheet-tutorial">
+            <p className="sheet-tutorial-label">{t("recommendIntro")}</p>
+            <a className="sheet-tutorial-link" href={skill.tutorial.url}
+              target="_blank" rel="noopener noreferrer">
+              {skill.tutorial.title}
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 9 L9 3 M5 3 H9 V7" stroke="currentColor" strokeWidth="1.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </a>
           </div>
+        )}
+
+        {skill.xp > 0 && (
+          <button className="sheet-reset" onClick={() => onReset(skill.id)}>
+            {t("resetSkill", { skill: tx(skill.name, lang) })}
+          </button>
         )}
       </div>
     </div>
   );
 }
 
-export default function SkillTreeV2() {
-  const [activeTree, setActiveTree] = useState("guitar");
-  const [trees, setTrees] = useState(() => {
-    try {
-      const saved = localStorage.getItem("skilltree-data");
-      if (saved) return JSON.parse(saved) as typeof TREES;
-    } catch { /* ignore */ }
-    return TREES;
+// ---------- MAIN APP ----------
+
+const STORAGE_KEY = "skilltree-v2-data";
+const STORAGE_HISTORY_KEY = "skilltree-v2-history";
+const STORAGE_LANG_KEY = "skilltree-v2-lang";
+const STORAGE_WELCOMED_KEY = "skilltree-v2-welcomed";
+
+function loadXp(): Record<string, Record<string, number>> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return {};
+}
+
+function loadHistory(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(STORAGE_HISTORY_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch { /* ignore */ }
+  return {};
+}
+
+function loadLang(): Lang {
+  try {
+    const v = localStorage.getItem(STORAGE_LANG_KEY);
+    if (v === "en" || v === "et") return v;
+  } catch { /* ignore */ }
+  return "en";
+}
+
+function applyXp(trees: Record<string, TreeData>, saved: Record<string, Record<string, number>>): Record<string, TreeData> {
+  const out: Record<string, TreeData> = {};
+  for (const [tree, data] of Object.entries(trees)) {
+    const next: TreeData = { ...data, skills: {} };
+    const savedTree = saved[tree] || {};
+    for (const [id, skill] of Object.entries(data.skills)) {
+      next.skills[id] = { ...skill, xp: Math.min(savedTree[id] ?? skill.xp, skill.maxXp) };
+    }
+    out[tree] = next;
+  }
+  return out;
+}
+
+export default function SkillTreeV2({ session }: { session: Session }) {
+  const userEmail = session.user.email ?? "";
+  const userName = (session.user.user_metadata?.name as string | undefined) || userEmail.split("@")[0] || "User";
+  const userInitial = userName.charAt(0).toUpperCase();
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const handleSignOut = async () => { await supabase.auth.signOut(); };
+
+  const [activeTree, setActiveTree] = useState<string>("guitar");
+  const [trees, setTrees] = useState<Record<string, TreeData>>(() => applyXp(TREES, loadXp()));
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [bloomBursts, setBloomBursts] = useState<Record<string, number>>({});
+  // Bursts that happened while the practice sheet was open — drained when it closes
+  // so the user actually sees the petal explosion (otherwise it plays behind the
+  // sheet's blurred backdrop). Stored in a ref since render never reads it directly.
+  const pendingBurstsRef = useRef<string[]>([]);
+  const [resetMenuOpen, setResetMenuOpen] = useState(false);
+  const [congratsTree, setCongratsTree] = useState<string | null>(null);
+  const [history, setHistory] = useState<Record<string, number>>(() => loadHistory());
+  const [lang, setLang] = useState<Lang>(() => loadLang());
+  const [statsOpen, setStatsOpen] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(() => {
+    try { return localStorage.getItem(STORAGE_WELCOMED_KEY) !== "true"; }
+    catch { return true; }
   });
-  const [selectedSkill, setSelectedSkill] = useState<Skill | null>(null);
-  const [animKey, setAnimKey] = useState(0);
+
+  const t = useMemo(() => makeT(lang), [lang]);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_HISTORY_KEY, JSON.stringify(history)); } catch { /* ignore */ }
+  }, [history]);
+
+  useEffect(() => {
+    try { localStorage.setItem(STORAGE_LANG_KEY, lang); } catch { /* ignore */ }
+  }, [lang]);
+
+  const dismissWelcome = useCallback(() => {
+    setWelcomeOpen(false);
+    try { localStorage.setItem(STORAGE_WELCOMED_KEY, "true"); } catch { /* ignore */ }
+  }, []);
+  const [undo, setUndo] = useState<{ message: string; snapshot: Record<string, TreeData>; ts: number } | null>(null);
+  const undoTimerRef = useRef<number | null>(null);
+
+  const showUndo = useCallback((message: string, snapshot: Record<string, TreeData>) => {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    setUndo({ message, snapshot, ts: Date.now() });
+    undoTimerRef.current = window.setTimeout(() => setUndo(null), 5000);
+  }, []);
+
+  const performUndo = useCallback(() => {
+    if (!undo) return;
+    setTrees(undo.snapshot);
+    setBloomBursts({});
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+    setUndo(null);
+  }, [undo]);
+
+  useEffect(() => () => {
+    if (undoTimerRef.current) window.clearTimeout(undoTimerRef.current);
+  }, []);
 
   const tree = trees[activeTree];
-  const skills = Object.values(tree.skills);
-  const totalXp = skills.reduce((s, sk) => s + sk.xp, 0);
-  const maxXp = skills.reduce((s, sk) => s + sk.maxXp, 0);
-  const completedCount = skills.filter((s) => s.status === "completed").length;
+  const states = deriveAllStates(tree.skills);
+  const bloomedCount = Object.values(states).filter((s) => s === "bloom").length;
+  const totalCount = Object.keys(tree.skills).length;
+
+  // Persist XP whenever trees change
+  useEffect(() => {
+    const payload: Record<string, Record<string, number>> = {};
+    for (const [name, data] of Object.entries(trees)) {
+      payload[name] = {};
+      for (const [id, sk] of Object.entries(data.skills)) {
+        payload[name][id] = sk.xp;
+      }
+    }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch { /* ignore */ }
+  }, [trees]);
 
   const handleLogXp = useCallback((skillId: string, amount: number) => {
+    let actualGain = 0;
     setTrees((prev) => {
-      const next = JSON.parse(JSON.stringify(prev)) as typeof TREES;
-      const skill = next[activeTree].skills[skillId];
-      if (!skill || skill.status === "locked" || skill.status === "completed") return prev;
-      skill.xp = Math.min(skill.xp + amount, skill.maxXp);
-      skill.progress = Math.round((skill.xp / skill.maxXp) * 100);
-      if (skill.status === "available" && skill.xp > 0) skill.status = "in-progress";
-      if (skill.xp >= skill.maxXp) {
-        skill.status = "completed"; skill.progress = 100;
-        for (const childId of skill.children) {
-          const child = next[activeTree].skills[childId];
-          if (child && child.status === "locked") {
-            const parents = Object.values(next[activeTree].skills)
-              .filter((s) => s.children.includes(childId));
-            if (parents.every((p) => p.status === "completed")) child.status = "available";
+      const next = { ...prev };
+      const curTree = next[activeTree];
+      const skill = curTree.skills[skillId];
+      if (!skill) return prev;
+
+      const wasBloom = skill.xp >= skill.maxXp;
+      const newXp = Math.min(skill.xp + amount, skill.maxXp);
+      actualGain = newXp - skill.xp;
+      const willBloom = newXp >= skill.maxXp;
+
+      next[activeTree] = {
+        ...curTree,
+        skills: { ...curTree.skills, [skillId]: { ...skill, xp: newXp } },
+      };
+
+      if (!wasBloom && willBloom) {
+        // Defer burst if sheet is open — drained on close. Otherwise fire immediately.
+        if (selectedId !== null) {
+          if (!pendingBurstsRef.current.includes(skillId)) {
+            pendingBurstsRef.current.push(skillId);
           }
+        } else {
+          setBloomBursts((b) => ({ ...b, [skillId]: (b[skillId] || 0) + 1 }));
         }
+        const allBloomed = Object.values(next[activeTree].skills)
+          .every((s) => s.xp >= s.maxXp);
+        if (allBloomed) setCongratsTree(activeTree);
       }
-      setSelectedSkill({ ...skill });
+
       return next;
     });
-  }, [activeTree]);
 
-  useEffect(() => {
-    if (selectedSkill) {
-      const updated = trees[activeTree].skills[selectedSkill.id];
-      if (updated) setSelectedSkill({ ...updated });
+    // Track effort in the daily history (capped at maxXp gain, so no extra credit
+    // for clicking +50 on a skill that only had 10 left).
+    if (actualGain > 0) {
+      const today = dayKey(new Date());
+      setHistory((h) => ({ ...h, [today]: (h[today] || 0) + actualGain }));
     }
-  }, [trees]);
+  }, [activeTree, selectedId]);
 
-  useEffect(() => {
-    localStorage.setItem("skilltree-data", JSON.stringify(trees));
-  }, [trees]);
+  const closeSheet = useCallback(() => {
+    setSelectedId(null);
+    const pending = pendingBurstsRef.current;
+    if (pending.length > 0) {
+      setBloomBursts((b) => {
+        const next = { ...b };
+        for (const id of pending) next[id] = (next[id] || 0) + 1;
+        return next;
+      });
+      pendingBurstsRef.current = [];
+    }
+  }, []);
 
   const switchTree = (key: string) => {
     setActiveTree(key);
-    setSelectedSkill(null);
-    setAnimKey((k) => k + 1);
+    closeSheet();
   };
 
+  const resetSkill = useCallback((skillId: string) => {
+    setTrees((prev) => {
+      const curTree = prev[activeTree];
+      const skill = curTree.skills[skillId];
+      if (!skill || skill.xp === 0) return prev;
+      showUndo(t("resetSkill", { skill: tx(skill.name, lang) }), prev);
+      return {
+        ...prev,
+        [activeTree]: {
+          ...curTree,
+          skills: { ...curTree.skills, [skillId]: { ...skill, xp: 0 } },
+        },
+      };
+    });
+  }, [activeTree, showUndo, t, lang]);
+
+  const resetTree = (key: string) => {
+    setTrees((prev) => {
+      showUndo(t("resetTree", { tree: t(key as "guitar") }), prev);
+      return {
+        ...prev,
+        [key]: {
+          ...prev[key],
+          skills: Object.fromEntries(
+            Object.entries(prev[key].skills).map(([id, sk]) => [id, { ...sk, xp: 0 }]),
+          ) as Record<string, Skill>,
+        },
+      };
+    });
+    setBloomBursts({});
+    setSelectedId(null);
+  };
+
+  const resetAll = () => {
+    setTrees((prev) => {
+      showUndo(t("resetAll"), prev);
+      return TREES;
+    });
+    setBloomBursts({});
+    setSelectedId(null);
+  };
+
+  const subtitleKey: "guitarSubtitle" | "cookingSubtitle" | "drawingSubtitle" =
+    `${activeTree}Subtitle` as "guitarSubtitle";
+
+  const stats = useMemo(() => computeStats(history, trees), [history, trees]);
+
+  const selectedSkill = selectedId ? tree.skills[selectedId] : null;
+  const selectedState = selectedSkill ? states[selectedSkill.id] : null;
+
   return (
-    <div style={{
-      width: "100vw", height: "100vh", background: PALETTE.cream,
-      overflow: "hidden", position: "relative",
-      backgroundImage: `radial-gradient(${PALETTE.faint}44 1px, transparent 1px)`,
-      backgroundSize: "24px 24px",
-    }}>
-      <style>{`
-        @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes budAppear { from { opacity: 0; transform: scale(0.8); } to { opacity: 1; transform: scale(1); } }
-        .tree-selector:hover { background: ${PALETTE.parchment} !important; }
-        .practice-btn:hover { background: ${PALETTE.parchment} !important; border-color: ${PALETTE.stone} !important; transform: translateY(-2px) scale(1.02); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-        .practice-btn:active { transform: scale(0.96) !important; }
-        * { box-sizing: border-box; }
-      `}</style>
-
-      {/* Top bar */}
-      <div style={{
-        position: "absolute", top: 0, left: 0, right: 0, zIndex: 10,
-        padding: "20px 28px", display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-        background: `linear-gradient(to bottom, ${PALETTE.cream} 60%, transparent)`,
-      }}>
-        <div>
-          <h1 style={{
-            fontFamily: "'Playfair Display', serif", fontSize: 26, fontWeight: 700,
-            color: PALETTE.ink, margin: 0, letterSpacing: "-0.5px",
-          }}>Grow</h1>
-          <p style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: PALETTE.stone,
-            margin: "2px 0 0", fontWeight: 500,
-          }}>{tree.description}</p>
+    <div className="app">
+      <header className="app-header">
+        <div className="app-title-block">
+          <h1 className="app-title">{t("growTitle")}</h1>
+          <p className="app-subtitle">{t(subtitleKey)}</p>
         </div>
 
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          background: PALETTE.parchment, borderRadius: 20, padding: "8px 16px",
-        }}>
-          <div style={{
-            width: 40, height: 4, borderRadius: 2, background: PALETTE.faint, overflow: "hidden",
-          }}>
-            <div style={{
-              height: "100%", width: `${(totalXp / maxXp) * 100}%`,
-              background: PALETTE.forest, borderRadius: 2,
-              transition: "width 0.6s ease",
-            }} />
-          </div>
-          <span style={{
-            fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
-            color: PALETTE.forest,
-          }}>{completedCount}/{skills.length}</span>
+        <div className="domain-tabs">
+          {Object.keys(trees).map((key) => (
+            <button key={key} className={`domain-tab${activeTree === key ? " is-active" : ""}`}
+              onClick={() => switchTree(key)}>
+              {t(key as "guitar")}
+            </button>
+          ))}
         </div>
-      </div>
 
-      {/* Tree selector */}
-      <div style={{
-        position: "absolute", top: 80, left: "50%", transform: "translateX(-50%)",
-        zIndex: 10, display: "flex", gap: 2,
-        background: PALETTE.parchment, borderRadius: 14, padding: 3,
-        border: `1px solid ${PALETTE.faint}`,
-      }}>
-        {Object.entries(trees).map(([key, t]) => (
-          <button key={key} className="tree-selector" onClick={() => switchTree(key)} style={{
-            background: activeTree === key ? PALETTE.cream : "transparent",
-            border: "none", borderRadius: 11, padding: "8px 20px", cursor: "pointer",
-            fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 500,
-            color: activeTree === key ? PALETTE.ink : PALETTE.stone,
-            boxShadow: activeTree === key ? "0 1px 4px rgba(0,0,0,0.06)" : "none",
-            transition: "all 0.2s",
-          }}>{t.name}</button>
-        ))}
-      </div>
+        <div className="progress-cluster">
+          {stats.currentStreak > 0 && (
+            <button className="streak-badge" onClick={() => setStatsOpen(true)} title={t("currentStreak")}>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M8 1.5C5 4 4 6 4 8.5a4 4 0 0 0 8 0c0-1.4-.5-2.5-1.4-3.4.4 1.5-.1 2.7-1.1 2.9.4-1.4-.1-3-1.5-6.5z"
+                  fill="currentColor" />
+              </svg>
+              <span>{stats.currentStreak}</span>
+            </button>
+          )}
 
-      {/* SVG Tree */}
-      <svg key={animKey} viewBox="0 -80 800 760" style={{
-        width: "100%", height: "100%", position: "absolute", top: 0, left: 0,
-      }}>
-        {/* Trunk from bottom */}
-        <path d={`M 400 600 C 400 560, 400 520, ${(skills[0]?.x / 100) * 800} ${(skills[0]?.y / 100) * 600}`}
-          fill="none" stroke={PALETTE.forest} strokeWidth={3} opacity={0.15} strokeLinecap="round" />
-
-        {skills.map((skill) =>
-          skill.children.map((childId) => {
-            const child = tree.skills[childId];
-            if (!child) return null;
-            return <OrganicBranch key={`${skill.id}-${childId}`}
-              parent={skill} child={child} parentStatus={skill.status} />;
-          })
-        )}
-
-        {skills.map((skill, i) => (
-          <SkillBud key={skill.id} skill={skill} index={i}
-            onClick={(s) => setSelectedSkill(selectedSkill?.id === s.id ? null : s)}
-            selected={selectedSkill?.id === skill.id} />
-        ))}
-      </svg>
-
-      {/* Legend */}
-      <div style={{
-        position: "absolute", bottom: 24, left: 28, display: "flex", gap: 20, zIndex: 5,
-      }}>
-        {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-          <div key={key} style={{ display: "flex", alignItems: "center", gap: 7 }}>
-            <div style={{
-              width: 10, height: 10, borderRadius: "50%",
-              background: key === "available" || key === "locked" ? "transparent" : cfg.color,
-              border: `1.5px solid ${cfg.color}`,
-              opacity: key === "locked" ? 0.4 : 0.8,
-              ...(key === "locked" ? { borderStyle: "dashed" } : {}),
-            }} />
-            <span style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: PALETTE.stone,
-              fontWeight: 500,
-            }}>{cfg.label}</span>
+          <div className="progress-pill">
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${(bloomedCount / totalCount) * 100}%` }} />
+            </div>
+            <span>{bloomedCount}/{totalCount}</span>
           </div>
-        ))}
-      </div>
 
-      {/* Attribution */}
-      <div style={{
-        position: "absolute", bottom: 24, right: 28,
-        fontFamily: "'Playfair Display', serif", fontSize: 11,
-        color: PALETTE.muted, fontStyle: "italic",
-      }}>
-        Every expert was once a beginner
-      </div>
+          <button className="header-icon-btn" title={t("stats")} onClick={() => setStatsOpen(true)}>
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="9" width="2.4" height="5" rx="0.6" fill="currentColor" />
+              <rect x="6.8" y="5" width="2.4" height="9" rx="0.6" fill="currentColor" />
+              <rect x="11.6" y="2" width="2.4" height="12" rx="0.6" fill="currentColor" />
+            </svg>
+          </button>
 
-      {/* Practice sheet */}
-      {selectedSkill && (
-        <PracticeSheet skill={selectedSkill}
-          onClose={() => setSelectedSkill(null)} onLogXp={handleLogXp} />
+          <button className="header-icon-btn lang-btn" title="Language" onClick={() => setLang((l) => l === "en" ? "et" : "en")}>
+            {lang.toUpperCase()}
+          </button>
+
+          <div className="reset-control">
+            <button className="header-icon-btn" title={t("resetProgress")}
+              onClick={() => setResetMenuOpen((o) => !o)}>
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                <path d="M2 8a6 6 0 1 0 1.76-4.24" stroke="currentColor" strokeWidth="1.6"
+                  strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M2 2v3.5h3.5" stroke="currentColor" strokeWidth="1.6"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {resetMenuOpen && (
+              <>
+                <div className="reset-backdrop" onClick={() => setResetMenuOpen(false)} />
+                <div className="reset-menu">
+                  <button onClick={() => { setResetMenuOpen(false); resetTree(activeTree); }}>
+                    {t("resetTree", { tree: t(activeTree as "guitar") })}
+                  </button>
+                  <button className="danger"
+                    onClick={() => { setResetMenuOpen(false); resetAll(); }}>
+                    {t("resetAll")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="reset-control">
+            <button className="user-avatar-btn" title={userEmail}
+              onClick={() => setUserMenuOpen((o) => !o)}>
+              {userInitial}
+            </button>
+            {userMenuOpen && (
+              <>
+                <div className="reset-backdrop" onClick={() => setUserMenuOpen(false)} />
+                <div className="reset-menu user-menu">
+                  <div className="user-menu-info">
+                    <div className="user-menu-name">{userName}</div>
+                    <div className="user-menu-email">{userEmail}</div>
+                  </div>
+                  <button onClick={() => { setUserMenuOpen(false); handleSignOut(); }}>
+                    {lang === "et" ? "Logi välja" : "Sign out"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <main className="stage">
+        <div className="tree-frame">
+          <svg viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid meet" className="tree-svg">
+            <SkillTree states={states} bloomBursts={bloomBursts} />
+
+            {/* Skill nodes on top */}
+            <g>
+              {NODE_IDS.map((id) => {
+                const skill = tree.skills[id];
+                if (!skill) return null;
+                const state = states[id];
+                const color = STATE_COLORS[state];
+                const isClickable = state !== "dormant";
+                return (
+                  <SkillNode key={id} id={id} skill={skill} state={state} color={color} lang={lang}
+                    onClick={isClickable ? () => setSelectedId(id) : undefined} />
+                );
+              })}
+            </g>
+          </svg>
+        </div>
+      </main>
+
+      <footer className="app-footer">
+        <div className="legend">
+          {(["bloom", "budding", "bare", "dormant"] as SkillState[]).map((s) => {
+            const c = STATE_COLORS[s];
+            const labelKey = ({ bloom: "inBloom", budding: "budding", bare: "bareBranch", dormant: "dormant" } as const)[s];
+            return (
+              <div key={s} className="legend-item">
+                <span className="legend-dot" style={{
+                  background: c.fill, borderColor: c.stroke,
+                  borderStyle: s === "dormant" ? "dashed" : "solid",
+                }} />
+                <span>{t(labelKey)}</span>
+              </div>
+            );
+          })}
+        </div>
+        <p className="tagline">{t("tagline")}</p>
+      </footer>
+
+      {undo && (
+        <div className="undo-toast" key={undo.ts}>
+          <span className="undo-message">{undo.message}</span>
+          <button className="undo-btn" onClick={performUndo}>{t("undo")}</button>
+        </div>
       )}
+
+      {selectedSkill && selectedState && (
+        <PracticeSheet skill={selectedSkill} state={selectedState} t={t} lang={lang}
+          onClose={closeSheet} onLogXp={handleLogXp} onReset={resetSkill} />
+      )}
+
+      {congratsTree && (
+        <CongratsOverlay treeName={t(congratsTree as "guitar")} t={t}
+          onClose={() => setCongratsTree(null)} />
+      )}
+
+      {statsOpen && <StatsModal data={stats} t={t} lang={lang} onClose={() => setStatsOpen(false)} />}
+
+      {welcomeOpen && <WelcomeModal t={t} onClose={dismissWelcome} />}
     </div>
   );
 }
+
+function CongratsOverlay({ treeName, t, onClose }: { treeName: string; t: TFn; onClose: () => void }) {
+  const [petals] = useState(() => {
+    const colors = ["#E8B5C0", "#D89AA8", "#A4C09A", "#7BA68F", "#C2D5B7"];
+    return Array.from({ length: 42 }, () => ({
+      left: Math.random() * 100,
+      delay: Math.random() * 4,
+      duration: 5 + Math.random() * 5,
+      rot: (Math.random() - 0.5) * 720,
+      drift: (Math.random() - 0.5) * 240,
+      size: 5 + Math.random() * 4,
+      color: colors[Math.floor(Math.random() * colors.length)],
+    }));
+  });
+
+  return (
+    <div className="congrats-backdrop" onClick={onClose}>
+      <div className="congrats-petals" aria-hidden="true">
+        {petals.map((p, i) => {
+          const cssVars = {
+            left: `${p.left}%`,
+            width: `${p.size}px`,
+            height: `${p.size * 1.4}px`,
+            background: p.color,
+            animationDelay: `${p.delay}s`,
+            animationDuration: `${p.duration}s`,
+            "--c-rot": `${p.rot}deg`,
+            "--c-drift": `${p.drift}px`,
+          } as CSSProperties;
+          return <span key={i} className="congrats-petal" style={cssVars} />;
+        })}
+      </div>
+      <div className="congrats-card" onClick={(e) => e.stopPropagation()}>
+        <p className="congrats-eyebrow">{t("fullyBloomed")}</p>
+        <h2 className="congrats-tree">{t("treeFullyGrown")}</h2>
+        <p className="congrats-message">{t("congratsAt", { tree: treeName.toLowerCase() })}</p>
+        <button className="congrats-close" onClick={onClose}>{t("continue")}</button>
+      </div>
+    </div>
+  );
+}
+
+function SkillNode({ id, skill, state, color, lang, onClick }: {
+  id: string; skill: Skill; state: SkillState; lang: Lang;
+  color: typeof STATE_COLORS[SkillState]; onClick?: () => void;
+}) {
+  const pos = LAYOUT_POSITIONS[id];
+  if (!pos) return null;
+  const r = 28;
+  const cursorStyle: CSSProperties = onClick ? { cursor: "pointer" } : {};
+  const label = tx(skill.name, lang);
+
+  return (
+    <g transform={`translate(${pos.x} ${pos.y})`} style={cursorStyle} onClick={onClick}>
+      <circle r={r} fill={color.fill} stroke={color.stroke}
+        strokeWidth={state === "dormant" ? 1.2 : 1.5}
+        strokeDasharray={state === "dormant" ? "3 3" : "none"} />
+      <NodeIcon kind={skill.icon} color={color.icon} />
+      <text y={r + 22} textAnchor="middle" fontFamily="'DM Sans', sans-serif"
+        fontSize="18" fontWeight="500" stroke="#FAF6F0" strokeWidth="5"
+        strokeLinejoin="round" fill="none" opacity="0.95"
+        style={{ pointerEvents: "none" }}>{label}</text>
+      <text y={r + 22} textAnchor="middle" fontFamily="'DM Sans', sans-serif"
+        fontSize="18" fontWeight="500" fill={color.label}
+        letterSpacing="0.01em" style={{ pointerEvents: "none" }}>{label}</text>
+    </g>
+  );
+}
+
+// Mirror of LAYOUTS.balanced.nodes — kept here so SkillNode positioning stays
+// trivially in sync without importing the heavy tree module's internals.
+const LAYOUT_POSITIONS: Record<string, { x: number; y: number }> = {
+  t0:  { x: 500, y: 640 },
+  tm1: { x: 500, y: 460 },
+  t1a: { x: 240, y: 360 },
+  t1b: { x: 760, y: 360 },
+  t2a: { x: 105, y: 195 },
+  t2b: { x: 320, y: 175 },
+  t2c: { x: 875, y: 205 },
+  tm2: { x: 500, y: 240 },
+  t3:  { x: 235, y:  60 },
+};
